@@ -3,9 +3,7 @@ main.py — YOLOv8 + Supervision ByteTrack Vehicle Detection
 """
 
 
-import os
 import cv2
-import csv
 import json
 import time
 import numpy as np
@@ -37,17 +35,11 @@ print(f"[INFO] Running inference on {DEVICE.upper()}")
 
 
 
-def process_video(video_source, output_path, csv_path, progress_callback=None):
+def process_video(video_source, output_path, progress_callback=None):
     """
     Processes a video or live stream using YOLOv8 + ByteTrack,
     computes smoothed vehicle speed, direction, and saves annotated output.
     """
-
-    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-
-    # Write CSV headers
-    with open(csv_path, "w", newline="") as f:
-        csv.writer(f).writerow(["timestamp", "id", "label", "speed_kmph", "direction"])
 
     # Load model & tracker
     model = YOLO("yolov8s.pt")
@@ -167,9 +159,8 @@ def process_video(video_source, output_path, csv_path, progress_callback=None):
                     direction
                 ])
 
-            # Write logs to CSV
-            with open(csv_path, "a", newline="") as f:
-                csv.writer(f).writerows(log_rows)
+           
+    
 
             # Draw annotations
             annotated = draw_annotations(frame.copy(), annotations)
@@ -191,7 +182,6 @@ def process_video(video_source, output_path, csv_path, progress_callback=None):
         real_fps = processed_frames / elapsed if elapsed > 0 else fps
         print(f"[INFO] Processed {processed_frames} frames in {elapsed:.1f}s ({real_fps:.2f} FPS)")
         print(f"[INFO] Annotated video saved to {output_path}")
-        print(f"[INFO] CSV log saved to {csv_path}")
 
     finally:
         cap.release()

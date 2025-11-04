@@ -1,7 +1,8 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Query
 from fastapi.responses import FileResponse
+from datetime import datetime
 from main import process_video
-import tempfile, zipfile, os
+import tempfile, os
 
 app = FastAPI(title="Vehicle Detection API")
 
@@ -10,21 +11,31 @@ def home():
     return {"status": "ok", "message": "YOLOv8 + Supervision Backend Ready"}
 
 @app.post("/upload_video/")
-async def upload_video(file: UploadFile = File(...)):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+async def upload_video(
+    file: UploadFile = File(...),
+    timestamp: str = Query(None, description="Shared timestamp from Flask"),
+):
+    # Generate timestamp if not provided
+    if not timestamp:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+    output_dir = "data"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Define paths
+    tmp_path = os.path.join(output_dir, f"input_{timestamp}.mp4")
+    output_path = os.path.join(output_dir, f"annotated_{timestamp}.mp4")
+
+    # Save uploaded file
+    with open(tmp_path, "wb") as tmp:
         tmp.write(await file.read())
-        tmp_path = tmp.name
 
-    output_path = "data/output_annotated.mp4"
-    csv_path = "data/vehicle_log.csv"
-    os.makedirs("data", exist_ok=True)
+    # Run vehicle detection and annotation
+    process_video(tmp_path, output_path)
 
-    process_video(tmp_path, output_path, csv_path)
-
-    # Zip both files
-    zip_path = "data/results.zip"
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        zf.write(output_path, os.path.basename(output_path))
-        zf.write(csv_path, os.path.basename(csv_path))
-
-    return FileResponse(zip_path, filename="results.zip", media_type="application/zip")
+    # Return video directly to client
+    return FileResponse(
+        output_path,
+        filename=f"annotated_{timestamp}.mp4",
+        media_type="video/mp4"
+    )
