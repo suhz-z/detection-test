@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Upload Video - Vehicle Detection</title>
+  <style>
+    body { background:#111;color:#eee;text-align:center;font-family:Arial; }
+    form { margin-top:100px; }
+    input[type=file] { color:#fff;margin:20px; }
+    button { background:#007bff;color:white;padding:10px 20px;border:none;
+             border-radius:5px;cursor:pointer; }
+    button:hover { background:#0056b3; }
+  </style>
+</head>
+<body>
+  <h1>🎥 Upload Video for Vehicle Detection</h1>
+  <form method="POST" enctype="multipart/form-data">
+    <input type="file" name="file" accept="video/*" required><br>
+    <button type="submit">Upload & Analyze</button>
+  </form>
+</body>
+</html>

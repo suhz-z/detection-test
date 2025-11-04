@@ -1,7 +1,0 @@
-ultralytics==8.1.18
-opencv-python>=4.5
-numpy
-scipy
-scikit-image
-filterpy
-pandas
