@@ -1,45 +1,51 @@
-# Vehicle Detection & Speed Estimation (Demo)
+# detection-test — simple README
 
-This demo detects vehicles using YOLOv8, tracks them with a lightweight SORT-like tracker,
-maps pixel coordinates to real-world meters via homography, and estimates speed in km/h.
+A small demo that uses YOLOv8 (Ultralytics) + Supervision to detect vehicles, annotate video,
+and produce a CSV log. The repo contains a FastAPI backend endpoint and a small Flask dashboard.
 
-## Contents
-- `main.py` - entry point (configured to use `test_video.mp4`)
-- `detector.py` - YOLOv8 wrapper
-- `tracker.py` - lightweight tracker and history for speed
-- `homography.py` - pixel -> world mapping helper
-- `utils.py` - drawing helpers
-- `sample_calibration.json` - example calibration (replace with measured points)
-- `requirements.txt` - needed Python packages
+Quick steps (Windows):
 
-## Setup
-1. Create and activate a Python virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate   # macOS/Linux
-   venv\Scripts\activate    # Windows
-   ```
+1) Create & activate a virtual env:
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
 
-3. Place your test video into the project folder and name it `test_video.mp4`
-   (or edit `VIDEO_SOURCE` in `main.py` to match your filename / RTSP URL).
+2) Install dependencies:
 
-4. Edit `sample_calibration.json` with at least 4 non-collinear correspondences:
-   - `image_points`: pixel coordinates from your image
-   - `world_points`: matching coordinates in meters on the road plane
-   Accurate calibration is crucial for correct speed (km/h) outputs.
+```powershell
+pip install -r requirements.txt
+```
 
-5. Run:
-   ```bash
-   python main.py
-   ```
+Notes about torch: the `requirements.txt` lists `torch` without a pinned CUDA build.
+If you need a specific CUDA-enabled wheel, install it from the official PyTorch instructions
+before or after installing the other packages.
 
-## Notes & tips
-- If your camera has lens distortion, undistort frames before running the pipeline.
-- For production use, replace the tracker with DeepSORT/ByteTrack for better ID persistence.
-- Use exact per-frame timestamps for dt when using live camera feeds for best speed estimates.
+3) Run the backend API (FastAPI) — the dashboard expects the API on port 8001:
+
+```powershell
+uvicorn backend.backend_api:app --reload --port 8001
+```
+
+4) Run the dashboard (Flask) which provides a simple upload UI:
+
+```powershell
+python -m dashboard.app
+```
+
+Files of interest:
+- `backend/main.py` — main detection pipeline and helper calls
+- `backend/detector.py` — YOLOv8 wrapper
+- `backend/homography.py` — homography / calibration helper
+- `backend/utils.py` — drawing & helper functions
+- `backend/backend_api.py` — FastAPI endpoint used to upload video and return results.zip
+- `dashboard/app.py` — Flask UI that uploads to the FastAPI backend
+
+Quick verification:
+- Upload a short MP4 via the dashboard or POST to `/upload_video/` on the FastAPI server.
+- The API will return `results.zip` containing an annotated MP4 and `vehicle_log.csv`.
+
+Notes: 
+- To Add live camera feed change the video capture to the feed http/rtsp
 
