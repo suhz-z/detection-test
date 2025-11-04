@@ -1,9 +1,12 @@
 from flask import Flask, render_template, request, send_file
 import requests
+import os
 
 
 app = Flask(__name__)
 FASTAPI_URL = "http://localhost:8001"
+RESULTS_DIR = "results"
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 @app.route("/")
 def index():
@@ -17,8 +20,11 @@ def upload():
             return "No file uploaded."
         files = {"file": (file.filename, file.read())}
         r = requests.post(f"{FASTAPI_URL}/upload_video/", files=files)
-        open("results.zip", "wb").write(r.content)
-        return send_file("results.zip", as_attachment=True)
+
+        zip_path = os.path.join(RESULTS_DIR, "results.zip")
+        with open(zip_path, "wb") as f:
+            f.write(r.content)
+        return send_file(zip_path, as_attachment=True)
     return render_template("upload.html")
 
 if __name__ == "__main__":

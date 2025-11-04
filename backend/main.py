@@ -1,7 +1,7 @@
 """
 main.py — YOLOv8 + Supervision ByteTrack Vehicle Detection
-Generates annotated video + CSV (no streaming).
 """
+
 
 import os
 import cv2
