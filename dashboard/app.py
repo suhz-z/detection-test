@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, send_file
 import requests
 
+
 app = Flask(__name__)
 FASTAPI_URL = "http://localhost:8001"
 

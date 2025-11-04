@@ -15,15 +15,18 @@ import supervision as sv
 from homography import HomographyCalibrator
 from utils import draw_annotations
 import torch
+from collections import deque
 
 # ---------------- USER CONFIG ----------------
 MODEL_NAME = "yolov8s.pt"
 CALIBRATION_FILE = "sample_calibration.json"
 FRAME_RESIZE = (960, 540)
-FRAME_SKIP = 1
+FRAME_SKIP = 2
 # ---------------------------------------------
 
 # Auto-detect best available device
+
+
 if torch.cuda.is_available():
     DEVICE = "cuda"
 elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -34,44 +37,54 @@ print(f"[INFO] Running inference on {DEVICE.upper()}")
 
 
 
-def process_video(video_source, output_path, csv_path):
-    """Processes a video using YOLOv8 + Supervision ByteTrack."""
+def process_video(video_source, output_path, csv_path, progress_callback=None):
+    """
+    Processes a video or live stream using YOLOv8 + ByteTrack,
+    computes smoothed vehicle speed, direction, and saves annotated output.
+    """
+
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
-    # Initialize CSV log
+    # Write CSV headers
     with open(csv_path, "w", newline="") as f:
         csv.writer(f).writerow(["timestamp", "id", "label", "speed_kmph", "direction"])
 
-    # Load YOLOv8 model + ByteTrack tracker
-    model = YOLO(MODEL_NAME)
-    model.to(DEVICE)
+    # Load model & tracker
+    model = YOLO("yolov8s.pt")
+    model.to("cuda" if torch.cuda.is_available() else "cpu")
     tracker = sv.ByteTrack()
-    box_annotator = sv.BoxAnnotator()
 
     # Load homography calibration
-    with open(CALIBRATION_FILE, "r") as f:
+    with open("sample_calibration.json", "r") as f:
         calib = json.load(f)
-    hom = HomographyCalibrator(
-        np.array(calib["image_points"]), np.array(calib["world_points"])
-    )
+    hom = HomographyCalibrator(np.array(calib["image_points"]), np.array(calib["world_points"]))
 
-    # Open video
+    # Open input source
     cap = cv2.VideoCapture(video_source)
     if not cap.isOpened():
-        raise SystemExit(f"Cannot open video source: {video_source}")
+        raise SystemExit(f" Cannot open video source: {video_source}")
 
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if not fps or fps <= 0:
+        fps = 30.0  # fallback for live camera or RTSP
     frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    FRAME_RESIZE = (960, 540)
+    FRAME_SKIP = 1
+
     if FRAME_RESIZE:
         frame_w, frame_h = FRAME_RESIZE
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(output_path, fourcc, fps, (frame_w, frame_h))
+    out = None
 
     track_history = {}
-    prev_time = time.time()
-    frame_idx = 0
+    speed_history = {}
+
+    processed_frames = 0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if cap.get(cv2.CAP_PROP_FRAME_COUNT) > 0 else 0
+    start_time = time.time()
 
     print("[INFO] Processing started...")
 
@@ -79,34 +92,28 @@ def process_video(video_source, output_path, csv_path):
         while True:
             ret, frame = cap.read()
             if not ret:
-                print("[INFO] End of video.")
                 break
 
-            frame_idx += 1
-            if frame_idx % FRAME_SKIP != 0:
+            processed_frames += 1
+            if FRAME_SKIP > 1 and processed_frames % FRAME_SKIP != 0:
                 continue
 
             if FRAME_RESIZE:
                 frame = cv2.resize(frame, FRAME_RESIZE)
 
-            now = time.time()
-            dt = now - prev_time if (now - prev_time) > 0 else (1.0 / fps)
-            prev_time = now
-
-            results = model(frame, verbose=False)[0]
+            # YOLOv8 inference
+            results = model(frame, verbose=False, half=True)[0]
             detections = sv.Detections.from_ultralytics(results)
 
-            # Keep only vehicle classes
-            vehicle_classes = [1, 2, 3, 5, 7]  # bicycle, car, motorbike, bus, truck
-            mask = np.isin(detections.class_id, vehicle_classes)
-            detections = detections[mask]
+            # Keep only relevant vehicle classes
+            detections = detections[np.isin(detections.class_id, [1, 2, 3, 5, 7])]
 
             tracked = tracker.update_with_detections(detections)
-            annotations, log_rows = [], []
 
-            for xyxy, cls, track_id in zip(
-                tracked.xyxy, tracked.class_id, tracked.tracker_id
-            ):
+            annotations = []
+            log_rows = []
+
+            for xyxy, cls, track_id in zip(tracked.xyxy, tracked.class_id, tracked.tracker_id):
                 if track_id is None:
                     continue
 
@@ -114,61 +121,91 @@ def process_video(video_source, output_path, csv_path):
                 cx, cy = int((x1 + x2) / 2), int(y2)
                 label = model.names[int(cls)]
 
-                world_pt = hom.image_to_world(np.array([cx, cy]))
+                # Convert image -> world coordinates
+                world_pt = np.array(hom.image_to_world(np.array([cx, cy])))
+
                 if track_id in track_history:
                     prev_pt = track_history[track_id]
-                    dx, dy = world_pt - prev_pt
-                    dist_m = np.sqrt(dx ** 2 + dy ** 2)
+                    dx, dy = world_pt - np.array(prev_pt)
+                    dist_m = np.sqrt(dx**2 + dy**2)
+
+                    # Ignore micro-movements (<5 cm) to avoid jitter
+                    if dist_m < 0.05:
+                        dist_m = 0.0
+
+                    # Fixed delta time for stability
+                    dt = 1.0 / fps
                     speed_kmph = (dist_m / dt) * 3.6
+
+                    # Rolling average smoothing
+                    if track_id not in speed_history:
+                        speed_history[track_id] = deque(maxlen=5)
+                    speed_history[track_id].append(speed_kmph)
+                    smooth_speed = sum(speed_history[track_id]) / len(speed_history[track_id])
+
                     direction = get_direction(dx, dy)
+
                 else:
-                    speed_kmph = 0.0
+                    smooth_speed = 0.0
                     direction = "N/A"
 
                 track_history[track_id] = world_pt
 
-                annotations.append(
-                    {
-                        "box": (x1, y1, x2, y2),
-                        "id": int(track_id),
-                        "label": label,
-                        "speed": speed_kmph,
-                        "direction": direction,
-                    }
-                )
+                annotations.append({
+                    "box": (x1, y1, x2, y2),
+                    "id": int(track_id),
+                    "label": label,
+                    "speed": smooth_speed,
+                    "direction": direction
+                })
 
-                log_rows.append(
-                    [
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        track_id,
-                        label,
-                        round(speed_kmph, 2),
-                        direction,
-                    ]
-                )
+                log_rows.append([
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    track_id,
+                    label,
+                    round(smooth_speed, 2),
+                    direction
+                ])
 
-            # Write to CSV
+            # Write logs to CSV
             with open(csv_path, "a", newline="") as f:
                 csv.writer(f).writerows(log_rows)
 
+            # Draw annotations
             annotated = draw_annotations(frame.copy(), annotations)
+
+            # Initialize output writer lazily
+            if out is None:
+                out_fps = fps / FRAME_SKIP
+                out = cv2.VideoWriter(output_path, fourcc, out_fps, (frame_w, frame_h))
+                print(f"[INFO] Output FPS set to {out_fps:.2f}")
+
             out.write(annotated)
 
-        print(f"[INFO] Finished. Video saved at {output_path}")
-        print(f"[INFO] CSV saved at {csv_path}")
+            # Optional progress callback
+            if progress_callback and processed_frames % 10 == 0 and total_frames > 0:
+                progress = int((processed_frames / total_frames) * 100)
+                progress_callback("processing", progress)
+
+        elapsed = time.time() - start_time
+        real_fps = processed_frames / elapsed if elapsed > 0 else fps
+        print(f"[INFO] Processed {processed_frames} frames in {elapsed:.1f}s ({real_fps:.2f} FPS)")
+        print(f"[INFO] Annotated video saved to {output_path}")
+        print(f"[INFO] CSV log saved to {csv_path}")
 
     finally:
         cap.release()
-        out.release()
+        if out:
+            out.release()
         cv2.destroyAllWindows()
 
 
 def get_direction(dx, dy):
+    """Estimate cardinal direction of motion."""
     if abs(dx) > abs(dy):
-        return "Eastbound" if dx > 0 else "Westbound"
+        return "East" if dx > 0 else "West"
     else:
-        return "Southbound" if dy > 0 else "Northbound"
-
+        return "South" if dy > 0 else "North"
 
 if __name__ == "__main__":
     process_video("video.mp4", "data/output_annotated.mp4", "data/vehicle_log.csv")
