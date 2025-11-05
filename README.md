@@ -1,7 +1,7 @@
 # detection-test — simple README
 
 A small demo that uses YOLOv8 (Ultralytics) + Supervision to detect vehicles, annotate video,
-and produce a CSV log. The repo contains a FastAPI backend endpoint and a small Flask dashboard.
+The repo contains a FastAPI backend endpoint and a small Flask dashboard.
 
 Quick steps (Windows):
 
@@ -44,7 +44,7 @@ Files of interest:
 
 Quick verification:
 - Upload a short MP4 via the dashboard or POST to `/upload_video/` on the FastAPI server.
-- The API will return `results.zip` containing an annotated MP4 and `vehicle_log.csv`.
+- The API will return `results.zip` containing an annotated MP4
 
 Notes: 
 - To Add live camera feed change the video capture to the feed http/rtsp
