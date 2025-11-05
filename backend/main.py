@@ -19,7 +19,7 @@ from collections import deque
 MODEL_NAME = "yolov8s.pt"
 CALIBRATION_FILE = "sample_calibration.json"
 FRAME_RESIZE = (960, 540)
-FRAME_SKIP = 2
+FRAME_SKIP = 1
 # ---------------------------------------------
 
 # Auto-detect best available device
@@ -62,8 +62,6 @@ def process_video(video_source, output_path, progress_callback=None):
     frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    FRAME_RESIZE = (960, 540)
-    FRAME_SKIP = 1
 
     if FRAME_RESIZE:
         frame_w, frame_h = FRAME_RESIZE
@@ -113,7 +111,7 @@ def process_video(video_source, output_path, progress_callback=None):
                 cx, cy = int((x1 + x2) / 2), int(y2)
                 label = model.names[int(cls)]
 
-                # Convert image -> world coordinates
+                # Convert image to world coordinates
                 world_pt = np.array(hom.image_to_world(np.array([cx, cy])))
 
                 if track_id in track_history:
@@ -121,7 +119,7 @@ def process_video(video_source, output_path, progress_callback=None):
                     dx, dy = world_pt - np.array(prev_pt)
                     dist_m = np.sqrt(dx**2 + dy**2)
 
-                    # Ignore micro-movements (<5 cm) to avoid jitter
+                    # avoid jitter
                     if dist_m < 0.05:
                         dist_m = 0.0
 
